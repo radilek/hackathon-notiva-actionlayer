@@ -4,6 +4,8 @@
 
 **Live demo:** [available during judging](https://luann-swampiest-georgianna.ngrok-free.dev).
 
+The free tunnel may show a one-time ngrok safety page; choose **Visit Site** to continue.
+
 **Hackathon submission:** [copy-ready answers](SUBMISSION.md)
 
 ![PRICE SNIPER demo showing a risky cheapest offer rejected in favor of a fair offer](docs/price-sniper-demo.png)
