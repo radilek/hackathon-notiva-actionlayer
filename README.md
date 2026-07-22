@@ -2,7 +2,7 @@
 
 > Photograph a product. Let an agent judge which price deserves your trust.
 
-**Live demo:** available during judging from this repository's homepage.
+**Live demo:** [available during judging](https://luann-swampiest-georgianna.ngrok-free.dev).
 
 **Hackathon submission:** [copy-ready answers](SUBMISSION.md)
 
