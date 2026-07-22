@@ -64,7 +64,10 @@ const app = spawn(process.execPath, ["server.mjs"], {
   env: {
     ...process.env,
     PORT: String(appPort), NOVITA_API_KEY: "test-only", ACTIONLAYER_API_KEY: "test-only",
-    NOVITA_API_URL: `http://127.0.0.1:${upstreamPort}/novita`, ACTIONLAYER_API_URL: `http://127.0.0.1:${upstreamPort}`
+    NOVITA_API_URL: `http://127.0.0.1:${upstreamPort}/novita`, ACTIONLAYER_API_URL: `http://127.0.0.1:${upstreamPort}`,
+    TRUST_PROXY: "true", DEMO_RATE_LIMIT_WINDOW_MS: "60000",
+    DEMO_VISION_GLOBAL_LIMIT: "2", DEMO_VISION_IP_LIMIT: "1",
+    DEMO_RESEARCH_GLOBAL_LIMIT: "2", DEMO_RESEARCH_IP_LIMIT: "1"
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -75,11 +78,19 @@ try {
     try { if ((await fetch(`${base}/api/health`)).ok) break; } catch {}
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const post = async (path, payload) => {
-    const response = await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  const request = async (path, payload, forwardedFor = "198.51.100.10") => {
+    const response = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
+      body: JSON.stringify(payload)
+    });
     const output = await response.json();
-    if (!response.ok) throw new Error(`${path}: ${output.error || response.status}`);
-    return output;
+    return { response, output };
+  };
+  const post = async (path, payload, forwardedFor) => {
+    const result = await request(path, payload, forwardedFor);
+    if (!result.response.ok) throw new Error(`${path}: ${result.output.error || result.response.status}`);
+    return result.output;
   };
   const identity = await post("/api/vision", { imageDataUrl: "data:image/jpeg;base64,/9j/2Q==" });
   if (identity.model !== "M185") throw new Error("Vision contract failed");
@@ -89,8 +100,29 @@ try {
   if (first.state !== "pending" || second.state !== "completed") throw new Error("ActionLayer polling contract failed");
   const decision = await post("/api/judge", { confirmedProduct: identity.searchQuery, ticketId: research.ticketId });
   if (decision.chosenOfferId !== "offer-fair" || decision.rejected[0]?.offerId !== "offer-risky") throw new Error("Judgment contract failed");
+
+  const visionCalls = () => calls.filter((call) => call === "POST /novita").length;
+  const taskCalls = () => calls.filter((call) => call === "POST /tasks").length;
+  const visionBeforeIpLimit = visionCalls();
+  const visionIpLimited = await request("/api/vision", { imageDataUrl: "data:image/jpeg;base64,/9j/2Q==" });
+  if (visionIpLimited.response.status !== 429 || !visionIpLimited.response.headers.get("retry-after") || !visionIpLimited.output.retryAfterSeconds) throw new Error("Vision IP rate limit contract failed");
+  if (visionCalls() !== visionBeforeIpLimit) throw new Error("Vision upstream was called after IP limit");
+  await post("/api/vision", { imageDataUrl: "data:image/jpeg;base64,/9j/2Q==" }, "198.51.100.11");
+  const visionBeforeGlobalLimit = visionCalls();
+  const visionGlobalLimited = await request("/api/vision", { imageDataUrl: "data:image/jpeg;base64,/9j/2Q==" }, "198.51.100.12");
+  if (visionGlobalLimited.response.status !== 429 || visionCalls() !== visionBeforeGlobalLimit) throw new Error("Vision global rate limit contract failed");
+
+  const tasksBeforeIpLimit = taskCalls();
+  const researchIpLimited = await request("/api/research", { confirmedQuery: identity.searchQuery });
+  if (researchIpLimited.response.status !== 429 || !researchIpLimited.output.retryAfterSeconds) throw new Error("Research IP rate limit contract failed");
+  if (taskCalls() !== tasksBeforeIpLimit) throw new Error("ActionLayer was called after IP limit");
+  await post("/api/research", { confirmedQuery: identity.searchQuery }, "198.51.100.11");
+  const tasksBeforeGlobalLimit = taskCalls();
+  const researchGlobalLimited = await request("/api/research", { confirmedQuery: identity.searchQuery }, "198.51.100.12");
+  if (researchGlobalLimited.response.status !== 429 || taskCalls() !== tasksBeforeGlobalLimit) throw new Error("Research global rate limit contract failed");
+
   if (calls.some((call) => /reply|checkout|purchase|cancel/.test(call))) throw new Error("Transactional route was called");
-  console.log("PASS vision → research ticket → poll → evidence-based judgment; no transaction route called");
+  console.log("PASS live-flow contracts and IP/global rate limits; no transaction route called after a limit");
 } finally {
   app.kill("SIGTERM");
   upstream.close();

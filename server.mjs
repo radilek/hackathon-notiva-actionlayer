@@ -10,6 +10,26 @@ const ACTIONLAYER_URL = (process.env.ACTIONLAYER_API_URL || "https://api.actionl
 const VISION_MODEL = process.env.NOVITA_MODEL || "qwen/qwen3-vl-30b-a3b-instruct";
 const BODY_LIMIT = 1_500_000;
 const IMAGE_LIMIT = 1_000_000;
+const RATE_LIMIT_WINDOW_MS = positiveInteger("DEMO_RATE_LIMIT_WINDOW_MS", 3_600_000);
+const TRUST_PROXY = process.env.TRUST_PROXY === "true";
+
+const rateLimits = {
+  vision: {
+    global: positiveInteger("DEMO_VISION_GLOBAL_LIMIT", 40),
+    perIp: positiveInteger("DEMO_VISION_IP_LIMIT", 10)
+  },
+  research: {
+    global: positiveInteger("DEMO_RESEARCH_GLOBAL_LIMIT", 20),
+    perIp: positiveInteger("DEMO_RESEARCH_IP_LIMIT", 5)
+  }
+};
+
+const rateBuckets = new Map();
+
+function positiveInteger(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
 
 const identitySchema = {
   type: "object",
@@ -80,25 +100,76 @@ const decisionSchema = {
   }
 };
 
-function json(res, status, payload) {
+function json(res, status, payload, headers = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(body),
     "cache-control": "no-store",
-    "x-content-type-options": "nosniff"
+    "x-content-type-options": "nosniff",
+    ...headers
   });
   res.end(body);
 }
 
 function fail(res, error, fallbackStatus = 500) {
   const status = Number(error?.status || fallbackStatus);
+  if (status === 429) {
+    const retryAfterSeconds = Math.max(1, Number(error?.retryAfterSeconds) || 1);
+    return json(res, status, {
+      error: String(error?.message || "Public demo limit reached. Please retry later."),
+      retryAfterSeconds
+    }, { "retry-after": String(retryAfterSeconds) });
+  }
   const message = status === 503
     ? String(error?.message || "Integration is not configured on the server.")
     : status >= 500
       ? "Upstream service error. Please retry."
       : String(error?.message || "Request failed.");
   json(res, status, { error: message });
+}
+
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const forwarded = req.headers["x-forwarded-for"];
+    const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const first = value?.split(",")[0]?.trim();
+    if (first) return first.slice(0, 128);
+  }
+  return String(req.socket.remoteAddress || "unknown").slice(0, 128);
+}
+
+function activeBucket(key, now) {
+  const current = rateBuckets.get(key);
+  if (current && current.resetAt > now) return current;
+  const fresh = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  rateBuckets.set(key, fresh);
+  return fresh;
+}
+
+function enforceRateLimit(req, name) {
+  const policy = rateLimits[name];
+  const now = Date.now();
+  const globalBucket = activeBucket(`${name}:global`, now);
+  if (globalBucket.count >= policy.global) {
+    const retryAfterSeconds = Math.ceil((globalBucket.resetAt - now) / 1000);
+    throw Object.assign(new Error("Public demo limit reached. Please retry later."), {
+      status: 429,
+      retryAfterSeconds
+    });
+  }
+
+  const ipBucket = activeBucket(`${name}:ip:${clientIp(req)}`, now);
+  if (ipBucket.count >= policy.perIp) {
+    const retryAfterSeconds = Math.ceil((ipBucket.resetAt - now) / 1000);
+    throw Object.assign(new Error("Public demo limit reached. Please retry later."), {
+      status: 429,
+      retryAfterSeconds
+    });
+  }
+
+  globalBucket.count += 1;
+  ipBucket.count += 1;
 }
 
 async function readJson(req) {
@@ -248,6 +319,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/api/vision") {
+      enforceRateLimit(req, "vision");
       const { imageDataUrl } = await readJson(req);
       const match = typeof imageDataUrl === "string" && imageDataUrl.match(/^data:image\/(?:jpeg|jpg|png|webp);base64,(.+)$/s);
       if (!match) throw Object.assign(new Error("A JPEG, PNG, or WebP image is required."), { status: 400 });
@@ -265,6 +337,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/api/research") {
+      enforceRateLimit(req, "research");
       const { confirmedQuery } = await readJson(req);
       if (typeof confirmedQuery !== "string" || confirmedQuery.trim().length < 3 || confirmedQuery.length > 240) {
         throw Object.assign(new Error("Confirm a product search query first."), { status: 400 });
