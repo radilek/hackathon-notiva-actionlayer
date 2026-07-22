@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = join(process.cwd(), "public");
 const NOVITA_URL = process.env.NOVITA_API_URL || "https://api.novita.ai/openai/v1/chat/completions";
 const ACTIONLAYER_URL = (process.env.ACTIONLAYER_API_URL || "https://api.actionlayer.io").replace(/\/$/, "");
-const VISION_MODEL = process.env.NOVITA_MODEL || "qwen/qwen2.5-vl-72b-instruct";
+const VISION_MODEL = process.env.NOVITA_MODEL || "qwen/qwen3-vl-30b-a3b-instruct";
 const BODY_LIMIT = 1_500_000;
 const IMAGE_LIMIT = 1_000_000;
 
@@ -279,7 +279,7 @@ const server = createServer(async (req, res) => {
       const ticket = await actionLayer("/tasks", {
         method: "POST",
         headers: { "idempotency-key": randomUUID() },
-        body: JSON.stringify({ goal, max_budget_usd: 0 })
+        body: JSON.stringify({ goal, max_budget_usd: 25 })
       });
       const id = ticketId(ticket);
       if (!id) throw new Error("ActionLayer returned no ticket id.");

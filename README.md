@@ -11,10 +11,12 @@ Requires Node.js 22+ and freshly rotated API keys. The keys previously pasted in
 3. Run `npm start`.
 4. Open `http://127.0.0.1:3000` and allow camera access, or upload a photo.
 
+The default live vision model is `qwen/qwen3-vl-30b-a3b-instruct`; override it with `NOVITA_MODEL` if needed.
+
 ## Live flow and contracts
 
 - `POST /api/vision` accepts a base64 image under 1 MB and returns a best-effort identity. Confidence below 0.8 or an unknown model/variant requires editable human confirmation.
-- `POST /api/research` creates an ActionLayer research-only ticket with a `$0` execution budget. Its goal explicitly forbids buying, spending, login, account creation, cart, checkout, credentials, or payment approval.
+- `POST /api/research` creates an ActionLayer research-only ticket with a `$25` task cap. Its goal explicitly forbids buying, spending, login, account creation, cart, checkout, credentials, or payment approval.
 - `GET /api/research/:ticketId` returns only sanitized ticket status and recent events. There is deliberately no reply endpoint.
 - `POST /api/judge` reloads the completed ticket server-side, then asks Novita to extract and judge only evidence-backed offers. Invalid URLs, prices, and offer IDs are rejected.
 

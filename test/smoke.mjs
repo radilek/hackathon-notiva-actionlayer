@@ -40,7 +40,7 @@ const upstream = createServer(async (req, res) => {
   }
   if (req.method === "POST" && req.url === "/tasks") {
     const input = await body(req);
-    if (input.max_budget_usd !== 0 || !input.goal.includes("Do not buy anything")) return respond(res, 400, { detail: "unsafe task" });
+    if (input.max_budget_usd !== 25 || !input.goal.includes("Do not buy anything")) return respond(res, 400, { detail: "unsafe task" });
     return respond(res, 200, { ticket_id: "tkt_smoke_001", state: "pending" });
   }
   if (req.method === "GET" && req.url === "/tasks/tkt_smoke_001") {
