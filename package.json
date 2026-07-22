@@ -1,0 +1,14 @@
+{
+  "name": "price-sniper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env.local server.mjs",
+    "check": "node --check server.mjs && node --check test/smoke.mjs",
+    "test": "node test/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
